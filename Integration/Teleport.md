@@ -83,32 +83,23 @@ storage:
   type: directory
   path: /var/lib/teleport/bot
 outputs:
-  # 1. Configuration pour l'accès SSH
-  - type: ssh_client
+  - type: identity
     destination:
       type: directory
       path: /opt/machine-id/ssh
-      
-  # 2. Configuration pour l'accès API Checkmk
-  - type: application
-    app_name: checkmk
-    destination:
-      type: directory
-      path: /opt/machine-id/checkmk
-      
-  # 3. Configuration pour l'accès API Proxmox
-  - type: application
-    app_name: proxmox
-    destination:
-      type: directory
-      path: /opt/machine-id/proxmox
 ```
+
+> [!warning]
+> Si votre teleport utilise un certificat auto-signé ou une autorité de certification que vous n'avez pas installé sur votre machine Hermes alors vous aurez une erreur à l'étape 8.
+> Pour se prémunir de cela, installez l'autorité de certification ou ajoutez l'option `insecure: true` en dessous de `auth_server:` pour passer la vérification du certificat
 
 7. Initialisez les dossiers de destination. Cette étape permet d'autoriser l'utilisateur Linux qui exécute l'agent Hermes (ici nommé UTILISATEUR_HERMES) à lire les certificats.  
 Remplacez cette valeur par le nom d'utilisateur réel :
 ```
-tbot init -c /etc/tbot.yaml --bot-user=root --reader-user=UTILISATEUR_HERMES --init-dir=/opt/machine-id/ssh
+tbot init -c /etc/tbot.yaml --bot-user=root --reader-user=root --init-dir=/opt/machine-id/ssh
 ```
+> [! critical]
+> Attention, on met ici `--read-user=root` seulement pour tester mais ce n'est pas une bonne pratique en production
 
 8. Démarrez le bot pour générer les certificats. Le processus va tourner en premier plan, vérifiez qu'aucune erreur ne s'affiche :
 ```
