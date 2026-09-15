@@ -108,8 +108,6 @@ outputs:
 Remplacez cette valeur par le nom d'utilisateur réel :
 ```
 tbot init -c /etc/tbot.yaml --bot-user=root --reader-user=UTILISATEUR_HERMES --init-dir=/opt/machine-id/ssh
-tbot init -c /etc/tbot.yaml --bot-user=root --reader-user=UTILISATEUR_HERMES --init-dir=/opt/machine-id/checkmk
-tbot init -c /etc/tbot.yaml --bot-user=root --reader-user=UTILISATEUR_HERMES --init-dir=/opt/machine-id/proxmox
 ```
 
 8. Démarrez le bot pour générer les certificats. Le processus va tourner en premier plan, vérifiez qu'aucune erreur ne s'affiche :
