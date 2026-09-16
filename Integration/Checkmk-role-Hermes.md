@@ -102,6 +102,16 @@ Trois rôles à créer dans **Setup ▸ Users ▸ Roles & permissions**, chacun 
 
 Rien d'autre dans *Setup* : en particulier, aucune case d'écriture et aucune activation.
 
+> **Et *Audit log* (`wato.auditlog`) ?** Elle n'est pas là, à dessein. C'est bien une permission de
+> **lecture** (consulter l'historique des modifications), mais elle ne sert pas à lire les sondes :
+> sa place naturelle est dans `hermes-ops`, qui écrit et doit pouvoir vérifier ce qu'il a changé.
+> L'ajouter ici n'ouvre aucun droit d'écriture — à cocher si on veut que l'agent, en lecture seule,
+> sache répondre à « qu'est-ce qui a changé depuis hier ? ».
+>
+> **Et la section *Topics* ?** Elle ne fait partie d'aucun profil, ni en lecture ni en écriture :
+> ce n'est pas un droit sur la supervision, seulement l'affichage des thèmes dans le menu (détail
+> plus bas dans cette section). La cocher ou non ne change rien à ce que le rôle peut faire.
+
 ### `hermes-ops` — il prépare le correctif, l'humain active
 
 Les 4 cases ci-dessus, **plus** :
