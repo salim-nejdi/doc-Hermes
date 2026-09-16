@@ -346,14 +346,17 @@ contre l'instance (Checkmk **2.5.0p11**, community). Méthode :
   l'API ne renverrait que les hôtes des groupes de contacts de l'utilisateur.
 - **L'inventaire du Setup** : la liste des hôtes et des dossiers
   (`wato.see_all_folders`, « Read access to all hosts and folders »).
+- **Les règles, depuis l'ajout de `Rule sets`** : la liste des 42 jeux de règles
+  qui en contiennent, les 21 règles du jeu `ignored_services`, et le contenu
+  complet d'une règle lue par son identifiant (conditions, valeur, dossier).
+- La console d'événements (`mkeventd.*` en lecture) — vide sur cette instance.
 - La version de l'instance.
 
 ### Ce que le compte se voit refuser (libellé rendu par l'instance)
 
-- `Rule sets` (`wato.rulesets`) → **aucune règle n'est lisible**, ni les jeux de
-  règles ni les règles posées. C'est la limite structurante : Hermes voit *qu'un
-  service est mal réglé*, il ne voit pas *la règle qui le règle*.
-- `Make changes, perform actions` (`wato.edit`) → aucune écriture possible.
+- `Make changes, perform actions` (`wato.edit`) → aucune écriture possible, y
+  compris sur une règle que le compte lit par ailleurs (vérifié sur une vraie
+  règle : `PUT`, `DELETE` et création répondent tous 401).
 - `Activate configuration` (`wato.activate`) → rien ne peut être publié.
 - `Audit log` (`wato.auditlog`), `User management` (`wato.users`),
   `Password management` (`wato.passwords`), `Site management` (`wato.sites`),
@@ -367,8 +370,9 @@ contre l'instance (Checkmk **2.5.0p11**, community). Méthode :
 utilisateurs, d'accès aux secrets, au journal d'audit ou aux sites — le compte ne
 peut pas dégrader la supervision, même détourné.
 
-**Un seul manque pour l'usage visé** : `Rule sets` (`wato.rulesets`). À ajouter à
-`hermes-read` — c'est un droit d'observation, pas d'action.
+**Un seul manquait pour l'usage visé** : `Rule sets` (`wato.rulesets`). Ajouté à
+`hermes-read` le 16/09/2026, puis retesté : la lecture des règles fonctionne et
+l'écriture reste refusée (§ « Confirmation en direct »). **Ni trop, ni pas assez.**
 
 ### Lire une règle sans jamais pouvoir la modifier
 
@@ -380,7 +384,7 @@ listés, **tous** sont exigés :
 |---|---|
 | `GET /objects/rule/{rule_id}` | `wato.rulesets` |
 | `GET /objects/ruleset/{ruleset_name}` | `wato.rulesets` |
-| `GET /domain-types/rule/collections/all` | `wato.rulesets` + `wato.all_folders` |
+| `GET /domain-types/rule/collections/all?ruleset_name=<nom>` | `wato.rulesets` |
 | `POST /domain-types/rule/collections/all` (créer) | **`wato.edit`** + `wato.rulesets` + `wato.all_folders` |
 | `PUT /objects/rule/{rule_id}` (modifier) | **`wato.edit`** + `wato.rulesets` + `wato.all_folders` |
 | `DELETE /objects/rule/{rule_id}` (supprimer) | **`wato.edit`** + `wato.rulesets` + `wato.all_folders` |
@@ -396,18 +400,47 @@ des `GET`, et les 28 écritures réclament toutes une permission supplémentaire
 profil ne possède pas (`wato.edit`, `wato.edit_hosts` ou `wato.rename_hosts`). Aucune
 écriture n'est donc atteignable par la seule permission de portée.
 
-**Deux endroits où l'API demande plus que nécessaire** — contournés sans rien élargir :
+**Le piège annoncé était un faux piège.** La spec OpenAPI de l'instance décrit
+`GET /domain-types/rule/collections/all` (recherche tous jeux confondus) et
+`GET /domain-types/ruleset/collections/all` (liste des jeux de règles) comme
+exigeant aussi `wato.all_folders` et `wato.edit_all_passwords`. **Mesuré sur
+l'instance : non.** Les deux endpoints répondent 200 avec `wato.rulesets` seul. La
+description est générique à toute la famille d'endpoints d'écriture, pas
+l'application réelle du contrôle. Conclusion pratique : `Rule sets` suffit à la
+lecture, rien d'autre n'est à concéder.
 
-- `GET /domain-types/rule/collections/all` (recherche tous jeux confondus) réclame
-  aussi `wato.all_folders` → inutile : `GET /objects/ruleset/{nom}` se contente de
-  `wato.rulesets`, et un jeu de règles se désigne par son nom.
-- `GET /domain-types/ruleset/collections/all` (liste des jeux de règles) réclame
-  `wato.edit_all_passwords` (« Write access to all passwords ») → inutile pour la
-  même raison.
+**Un détail de chemin, lui, bien réel** : `GET /objects/ruleset/{nom}` répond 200
+mais ne liste les règles que dans la portée du dossier courant — 0 règle en
+pratique. Pour lire les règles d'un jeu : `GET
+/domain-types/rule/collections/all?ruleset_name=<nom>`, puis
+`GET /objects/rule/{id}` pour le contenu d'une règle.
 
 `Activate configuration` (`wato.activate`) reste hors profil : **lire une règle ne
 permet pas de l'appliquer**, et la configuration n'est jamais activée par un compte
 de lecture.
+
+### Confirmation en direct (16/09/2026, après ajout de `Rule sets`)
+
+Permission ajoutée au compte, puis sondes rejouées. Réponses de l'instance :
+
+| Ce que fait le compte | Réponse |
+|---|---|
+| lire les jeux de règles qui en contiennent (42) | 200 |
+| lire les 21 règles du jeu `ignored_services` | 200 |
+| lire une règle par son identifiant | 200 — conditions, valeur et dossier compris |
+| modifier une règle (`PUT`) | **401 — `Make changes, perform actions`** |
+| supprimer une règle (`DELETE`) | **401 — `Make changes, perform actions`** |
+| créer une règle (`POST`) | **401 — `Make changes, perform actions`** |
+
+**Lire oui, écrire non** — et ce n'est pas une convention de rédaction : c'est
+l'instance qui refuse, sur la règle elle-même. Comptage avant/après identique
+(29 hôtes, 7 dossiers, 48 downtimes, 48 commentaires, 42 jeux, 2 règles) : **rien
+n'a été modifié**.
+
+Reste fermé, vérifié au même moment : `Time periods`, `Edit personal notification
+settings`, `User management`, `Host & service groups`, `Password management`,
+`Audit log`, `Activate configuration`, `Site management`, `Manage tags`. Rien n'a
+été ouvert « en passant » par l'ajout de `Rule sets`.
 
 ### Identifiants tels que l'instance les nomme
 
@@ -462,17 +495,26 @@ Les sondes sont rejouables : `probe_api4.py` (lecture + écriture sans effet) et
   `cmk/gui/openapi/api_endpoints/rule/_utils.py`,
   `cmk/gui/openapi/endpoints/activate_changes/__init__.py`).
 - ✅ Chemins d'API des endpoints `rule` et `activation_run`.
+- ✅ Séparation lecture/écriture sur les règles **mesurée en direct** : `Rule sets`
+  accordé → lecture des règles et des jeux de règles ; toute écriture (créer,
+  modifier, supprimer) refusée avec `Make changes, perform actions`.
 - ✅ Section *Topics* du rôle éditeur : permissions dynamiques des pages
   (`cmk/gui/pagetypes/_core.py`, `declare_permission_section` / `declare_permission`) —
   visibilité des thèmes, sans droit d'écriture.
-- ⚠️ Création/modification de règle en pratique : corps exact du message, gestion des `etag`,
-  comportement sur un dossier restreint.
+- ⚠️ Création/modification de règle par un compte *autorisé* à écrire : corps exact du
+  message, gestion des `etag`, comportement sur un dossier restreint — impossible à
+  tester avec `hermes-read`, qui n'a pas le droit d'écrire (c'est le but).
 - ⚠️ Comportement du rollback automatique et fenêtre de mesure pertinente.
 - ⚠️ Le compte d'automatisation `hermes-read` existe et a été testé (§11). Les deux
   autres profils (`hermes-ops`, `hermes-auto`) ne sont pas créés : rien n'est encore
   appliqué en écriture sur la production.
 
 ## 13. Journal des mises à jour
+
+- **16/09/2026** — §11 : retest après ajout de `Rule sets` à `hermes-read` — lecture des
+  règles confirmée (42 jeux, 21 règles d'un jeu, une règle par identifiant), écriture
+  toujours refusée (401 `Make changes, perform actions`) ; le « piège » `Write access to
+  all hosts and folders` annoncé par la spec s'avère non appliqué.
 
 - **16/09/2026** — §11 : résultats des tests réels du compte `hermes-read` sur l'instance
   (matrice endpoint → permissions extraite de la spec OpenAPI 2.5, permissions
