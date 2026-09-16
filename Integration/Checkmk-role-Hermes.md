@@ -565,6 +565,12 @@ Les sondes sont rejouables : `probe_api4.py` (lecture + écriture sans effet) et
 - ✅ Section *Topics* du rôle éditeur : permissions dynamiques des pages
   (`cmk/gui/pagetypes/_core.py`, `declare_permission_section` / `declare_permission`) —
   visibilité des thèmes, sans droit d'écriture.
+- ✅ Découverte de services **hors de portée d'un compte de lecture**, mesuré sur cinq
+  hôtes : même la *lecture* du tableau de découverte
+  (`GET /objects/service_discovery/<hôte>`) répond 401 et l'instance nomme
+  `Make changes, perform actions` (`wato.edit`). Conséquence pratique : poser le plugin
+  `mk_docker` sur les machines est automatisable, accepter les services ne l'est pas —
+  voir [Superviser les conteneurs Docker](./Supervision-conteneurs-Docker.md).
 - ⚠️ Création/modification de règle par un compte *autorisé* à écrire : corps exact du
   message, gestion des `etag`, comportement sur un dossier restreint — impossible à
   tester avec `hermes-read`, qui n'a pas le droit d'écrire (c'est le but).
@@ -575,6 +581,12 @@ Les sondes sont rejouables : `probe_api4.py` (lecture + écriture sans effet) et
 
 ## 13. Journal des mises à jour
 
+- **16/09/2026** — §12 : la découverte de services est refusée à `hermes-read`, y compris en
+  lecture (401 `wato.edit`), sur les cinq hôtes testés. Nouvelle page
+  [Superviser les conteneurs Docker d'un parc](./Supervision-conteneurs-Docker.md) : plugin
+  d'agent `mk_docker.py`, dépendance `python3-docker`, et les réglages WUD qui font la
+  différence (`restart: unless-stopped`, suivi par digest côté registre, trigger Docker qui
+  met à jour tout seul).
 - **16/09/2026** — §4 et §11 : *Event Console*. La lecture des événements répond 200 sans
   aucune case `mkeventd.*` (sondage en lecture seule, `probe_ec.py`) ; les 14 permissions de
   la section sont visibilité / action / configuration, aucune n'ajoute de la lecture.
