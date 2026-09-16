@@ -315,7 +315,111 @@ du rule set visé. Le détail des modèles est dans `cmk/gui/openapi/api_endpoin
 - **Un problème applicatif déguisé en mauvais réglage** : remonter le seuil ne répare pas une
   application lente. C'est justement le cas que le profil 2 laisse trancher par un humain.
 
-## 11. Ce qui est vérifié, ce qui reste à tester
+## 11. Vérification sur l'instance (16/09/2026)
+
+Le compte d'automatisation **`hermes-read`** a été créé puis testé pour de vrai
+contre l'instance (Checkmk **2.5.0p11**, community). Méthode :
+
+1. la spec OpenAPI que l'instance sert elle-même (`/api/1.0/openapi-doc.yaml`)
+   donne, pour chacun de ses 193 endpoints, **la liste exacte des permissions
+   exigées** — c'est la source la plus fiable, elle décrit *cette* version ;
+2. chaque endpoint a ensuite été appelé réellement : quand une permission manque,
+   Checkmk répond 401 **en nommant la permission** — le libellé ci-dessous est
+   donc rendu par l'instance, pas déduit ;
+3. les sondes d'écriture visent des cibles **inexistantes** (règle sans jeu de
+   règles, hôte dupliqué) : si la permission manque, l'appel échoue avant tout
+   effet ; sinon il échoue sur la cible. Comptage avant/après identique
+   (hôtes, dossiers, downtimes, commentaires inchangés) — **rien n'a été modifié**.
+
+### Ce que le compte peut lire
+
+- **Tout le parc, en supervision** : les hôtes, tous leurs services et leurs
+  états, les downtimes, les commentaires, la console d'événements. Autrement dit
+  `general.see_all` (« See all hosts and services ») est bien accordé — sans lui
+  l'API ne renverrait que les hôtes des groupes de contacts de l'utilisateur.
+- **L'inventaire du Setup** : la liste des hôtes et des dossiers
+  (`wato.see_all_folders`, « Read access to all hosts and folders »).
+- La version de l'instance.
+
+### Ce que le compte se voit refuser (libellé rendu par l'instance)
+
+- `Rule sets` (`wato.rulesets`) → **aucune règle n'est lisible**, ni les jeux de
+  règles ni les règles posées. C'est la limite structurante : Hermes voit *qu'un
+  service est mal réglé*, il ne voit pas *la règle qui le règle*.
+- `Make changes, perform actions` (`wato.edit`) → aucune écriture possible.
+- `Activate configuration` (`wato.activate`) → rien ne peut être publié.
+- `Audit log` (`wato.auditlog`), `User management` (`wato.users`),
+  `Password management` (`wato.passwords`), `Site management` (`wato.sites`),
+  `Host & service groups` (`wato.groups`), `Time periods` (`wato.timeperiods`),
+  `Manage tags` (`wato.hosttags`), `Business Intelligence rules` (`wato.bi_rules`),
+  `Edit personal notification settings` (`general.edit_notifications`).
+
+### Verdict
+
+**Rien en trop.** Aucun droit d'écriture, d'activation, d'administration des
+utilisateurs, d'accès aux secrets, au journal d'audit ou aux sites — le compte ne
+peut pas dégrader la supervision, même détourné.
+
+**Un manque pour l'usage visé** : `Rule sets` (`wato.rulesets`). En lecture seule
+c'est un droit d'observation, pas d'action (l'écriture exige `wato.edit` en plus).
+À ajouter au profil `hermes-read` si Hermes doit expliquer un réglage, pas
+seulement constater un symptôme.
+
+⚠️ **Piège d'API à connaître** : la lecture des règles via l'API REST déclare
+exiger `wato.rulesets` **et** `wato.all_folders` (« Write access to all hosts and
+folders »). Pour un profil strictement en lecture, deux options : accepter ce
+droit d'écriture sur les dossiers (l'API l'exige), ou donner au compte
+l'appartenance au groupe de contacts du dossier de test — la doc Checkmk précise
+que la gestion des règles se limite aux dossiers auxquels on a droit.
+
+### Identifiants tels que l'instance les nomme
+
+Table relevée dans la spec OpenAPI de l'instance (libellé ↔ identifiant) :
+
+```
+Activate configuration            wato.activate
+Add & remove folders              wato.manage_folders
+Add & remove hosts                wato.manage_hosts
+Add comments                      action.addcomment
+Acknowledge                       action.acknowledge
+Agent pairing                     general.agent_pairing
+Archive an event                  mkeventd.delete
+Audit log                         wato.auditlog
+Business Intelligence rules       wato.bi_rules
+Change event state                mkeventd.changestate
+Disabled services                 wato.service_discovery_to_ignored
+Edit personal notification…       general.edit_notifications
+Host & service groups             wato.groups
+Host management                   wato.hosts
+Make changes, perform actions     wato.edit
+Manage background jobs            background_jobs.manage_jobs
+Manage services                   wato.services
+Manage tags                       wato.hosttags
+Modify existing folders           wato.edit_folders
+Modify existing hosts             wato.edit_hosts
+Move existing hosts               wato.move_hosts
+Move to monitored services        wato.service_discovery_to_monitored
+Move to undecided services        wato.service_discovery_to_undecided
+Password management               wato.passwords
+Perform network parent scan       wato.parentscan
+Read access to all hosts/folders  wato.see_all_folders
+Read access to all modules        wato.seeall
+Remove services                   wato.service_discovery_to_removed
+Rename existing hosts             wato.rename_hosts
+Rule sets                         wato.rulesets
+Set/remove downtimes              action.downtimes
+Site management                   wato.sites
+Time periods                      wato.timeperiods
+Update an event                   mkeventd.update
+User management                   wato.users
+Write access to all hosts/folders wato.all_folders
+Write access to all passwords     wato.edit_all_passwords
+```
+
+Les sondes sont rejouables : `probe_api4.py` (lecture + écriture sans effet) et
+`spec_perms.py` (matrice endpoint → permissions, extraite de la spec).
+
+## 12. Ce qui est vérifié, ce qui reste à tester
 
 - ✅ Permissions et séparation écrire/activer (`cmk/gui/wato/_permissions.py`,
   `cmk/gui/openapi/api_endpoints/rule/_utils.py`,
@@ -327,10 +431,16 @@ du rule set visé. Le détail des modèles est dans `cmk/gui/openapi/api_endpoin
 - ⚠️ Création/modification de règle en pratique : corps exact du message, gestion des `etag`,
   comportement sur un dossier restreint.
 - ⚠️ Comportement du rollback automatique et fenêtre de mesure pertinente.
-- ⚠️ Aucun rôle ni utilisateur d'automation n'a encore été créé sur le site : rien n'a été
-  appliqué en production à ce stade.
+- ⚠️ Le compte d'automatisation `hermes-read` existe et a été testé (§11). Les deux
+  autres profils (`hermes-ops`, `hermes-auto`) ne sont pas créés : rien n'est encore
+  appliqué en écriture sur la production.
 
-## 12. Journal des mises à jour
+## 13. Journal des mises à jour
+
+- **16/09/2026** — §11 : résultats des tests réels du compte `hermes-read` sur l'instance
+  (matrice endpoint → permissions extraite de la spec OpenAPI 2.5, permissions
+  manquantes nommées par l'instance, sondes d'écriture sans effet, verdict « rien en
+  trop, il manque *Rule sets* »).
 
 - **16/09/2026** — §4 : la liste des cases à cocher, rôle par rôle, et la clarification de la
   section *Topics* (visibilité seule). §3 : identifiant de *See all host and services*
