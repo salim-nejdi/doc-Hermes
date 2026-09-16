@@ -75,7 +75,9 @@ Identifiants relevés dans `cmk/gui/wato/_permissions.py` (branche `master`) ✅
 
 Vérifié dans les endpoints OpenAPI de Checkmk (branche `master`) ✅ :
 
-- **lire** les règles d'un rule set → `AllPerm(wato.rulesets, wato.all_folders optionnel)` ;
+- **lire** une règle ou un jeu de règles → `wato.rulesets` **seul**
+  (`GET /objects/rule/{id}`, `GET /objects/ruleset/{nom}`) ; la recherche « tous jeux
+  confondus » ajoute `wato.all_folders` ;
 - **créer / modifier / déplacer / supprimer** une règle → `wato.edit` **et** `wato.rulesets`,
   plus le droit d'écriture sur le dossier visé ;
 - **activer** la configuration → `wato.activate` ;
@@ -99,6 +101,12 @@ Trois rôles à créer dans **Setup ▸ Users ▸ Roles & permissions**, chacun 
 | Setup | Use Setup | `wato.use` |
 | Setup | Read access to all modules | `wato.seeall` |
 | Setup | Read access to all hosts and folders | `wato.see_all_folders` |
+| Setup | Rule sets | `wato.rulesets` |
+
+`Rule sets` est un droit de **lecture** : il ouvre la consultation des règles, dans l'interface
+comme par l'API. Toute écriture sur une règle exige en plus `Make changes, perform actions`
+(`wato.edit`), qui reste décochée ici — c'est la garantie de ce profil (démonstration
+opération par opération en §11).
 
 Rien d'autre dans *Setup* : en particulier, aucune case d'écriture et aucune activation.
 
@@ -114,12 +122,11 @@ Rien d'autre dans *Setup* : en particulier, aucune case d'écriture et aucune ac
 
 ### `hermes-ops` — il prépare le correctif, l'humain active
 
-Les 4 cases ci-dessus, **plus** :
+Les 5 cases ci-dessus, **plus** :
 
 | Section | Case à cocher | Identifiant |
 |---|---|---|
-| Setup | Rule sets | `wato.rulesets` |
-| Setup | Make changes, perform actions | `wato.edit` |
+| Setup | Make changes, perform actions | `wato.edit` — c'est elle qui autorise l'écriture des règles |
 | Setup | Audit log | `wato.auditlog` |
 | Setup | Revert changes | `wato.discard` |
 | Setup | Write access to all hosts and folders | `wato.all_folders` — **seulement** si la portée est « tous les hôtes » ; sinon laisser décoché et travailler dans un dossier |
@@ -133,7 +140,7 @@ Et la seule case qui fait vraiment la différence pour ce profil :
 
 ### `hermes-auto` — boucle fermée
 
-Les 4 cases de `hermes-read`, les 4 nécessaires de `hermes-ops`, **plus** :
+Les 5 cases de `hermes-read`, les 5 nécessaires de `hermes-ops`, **plus** :
 
 | Section | Case à cocher | Identifiant |
 |---|---|---|
@@ -360,17 +367,47 @@ contre l'instance (Checkmk **2.5.0p11**, community). Méthode :
 utilisateurs, d'accès aux secrets, au journal d'audit ou aux sites — le compte ne
 peut pas dégrader la supervision, même détourné.
 
-**Un manque pour l'usage visé** : `Rule sets` (`wato.rulesets`). En lecture seule
-c'est un droit d'observation, pas d'action (l'écriture exige `wato.edit` en plus).
-À ajouter au profil `hermes-read` si Hermes doit expliquer un réglage, pas
-seulement constater un symptôme.
+**Un seul manque pour l'usage visé** : `Rule sets` (`wato.rulesets`). À ajouter à
+`hermes-read` — c'est un droit d'observation, pas d'action.
 
-⚠️ **Piège d'API à connaître** : la lecture des règles via l'API REST déclare
-exiger `wato.rulesets` **et** `wato.all_folders` (« Write access to all hosts and
-folders »). Pour un profil strictement en lecture, deux options : accepter ce
-droit d'écriture sur les dossiers (l'API l'exige), ou donner au compte
-l'appartenance au groupe de contacts du dossier de test — la doc Checkmk précise
-que la gestion des règles se limite aux dossiers auxquels on a droit.
+### Lire une règle sans jamais pouvoir la modifier
+
+Permissions exigées par chaque opération, relevées dans la spec OpenAPI servie par
+l'instance (`/check_mk/api/1.0/openapi-doc.yaml`). Quand plusieurs identifiants sont
+listés, **tous** sont exigés :
+
+| Opération | Permissions exigées |
+|---|---|
+| `GET /objects/rule/{rule_id}` | `wato.rulesets` |
+| `GET /objects/ruleset/{ruleset_name}` | `wato.rulesets` |
+| `GET /domain-types/rule/collections/all` | `wato.rulesets` + `wato.all_folders` |
+| `POST /domain-types/rule/collections/all` (créer) | **`wato.edit`** + `wato.rulesets` + `wato.all_folders` |
+| `PUT /objects/rule/{rule_id}` (modifier) | **`wato.edit`** + `wato.rulesets` + `wato.all_folders` |
+| `DELETE /objects/rule/{rule_id}` (supprimer) | **`wato.edit`** + `wato.rulesets` + `wato.all_folders` |
+| `POST /objects/rule/{rule_id}/actions/move/invoke` | **`wato.edit`** + `wato.rulesets` + `wato.all_folders` |
+
+Autrement dit : **`wato.rulesets` seul ouvre la lecture ; toute écriture exige
+`wato.edit` en plus.** La séparation n'est pas une convention de rédaction, elle est
+appliquée par l'API.
+
+Contrôle étendu à toute l'API (193 endpoints, 35 opérations exigeant une permission
+de *portée* — `wato.all_folders` ou `wato.edit_all_passwords`) : les 7 lectures sont
+des `GET`, et les 28 écritures réclament toutes une permission supplémentaire que le
+profil ne possède pas (`wato.edit`, `wato.edit_hosts` ou `wato.rename_hosts`). Aucune
+écriture n'est donc atteignable par la seule permission de portée.
+
+**Deux endroits où l'API demande plus que nécessaire** — contournés sans rien élargir :
+
+- `GET /domain-types/rule/collections/all` (recherche tous jeux confondus) réclame
+  aussi `wato.all_folders` → inutile : `GET /objects/ruleset/{nom}` se contente de
+  `wato.rulesets`, et un jeu de règles se désigne par son nom.
+- `GET /domain-types/ruleset/collections/all` (liste des jeux de règles) réclame
+  `wato.edit_all_passwords` (« Write access to all passwords ») → inutile pour la
+  même raison.
+
+`Activate configuration` (`wato.activate`) reste hors profil : **lire une règle ne
+permet pas de l'appliquer**, et la configuration n'est jamais activée par un compte
+de lecture.
 
 ### Identifiants tels que l'instance les nomme
 
