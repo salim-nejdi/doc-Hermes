@@ -163,7 +163,11 @@ l'agent n'active et n'annule que ses propres modifications.
 | Setup | Activate foreign changes | `wato.activateforeign` | embarquerait les modifications des autres utilisateurs |
 | Setup | Revert foreign changes | `wato.discardforeign` | idem, en suppression |
 | General | Edit / force / delete foreign `…`, Modify built-in `…` | `general.edit_*`, `general.force_*` | édition des objets créés par d'autres utilisateurs |
-| Modules | Global settings, User management, Roles, Site management, Backup & restore, Event Console, BI, NagVis, snapshots | — | hors périmètre |
+| Modules | Global settings, User management, Roles, Site management, Backup & restore, BI, NagVis, snapshots | — | hors périmètre |
+
+La *Event Console* n'est pas un interdit de sécurité mais un **cas à part** : la lecture y
+est déjà ouverte sans aucune case à cocher, et toutes ses permissions sont des droits
+d'action ou de configuration — voir la sous-section suivante.
 
 ### La section « Topics » : visibilité seule, sans effet sur les droits d'écriture
 
@@ -183,6 +187,50 @@ Même mécanique pour la section *Dashboards* (`checkmk`, `simple_problems`, `ma
 des tableaux de bord nommés. Et les cases `… dashboards` de la section *General* ne concernent
 que la création ou l'édition des tableaux de bord **des utilisateurs**, sans effet sur la
 supervision des hôtes.
+
+### La console d'événements (`mkeventd.*`) : rien à cocher, la lecture est déjà ouverte
+
+Mesuré le 16/09/2026 : `GET /domain-types/event_console/collections/all` répond **200** au
+compte `hermes-read` **tel qu'il est configuré** — la lecture des événements par l'API
+n'exige donc aucune case de la section *Event Console* du rôle éditeur.
+
+La section ne propose d'ailleurs pas de « droit de lecture » : ses 14 permissions sont des
+droits de **visibilité**, d'**action** ou de **configuration**. Cocher l'une d'elles ne peut
+que restreindre l'affichage, ou ajouter du pouvoir d'écriture.
+
+| Libellé | Identifiant | Nature | À cocher ? |
+|---|---|---|---|
+| See all events | `mkeventd.seeall` | visibilité (filtre par groupes de contacts) | non — sans effet ici : le compte voit déjà tout le parc |
+| See events not related to a known host | `mkeventd.seeunrelated` | visibilité | non — même raison |
+| See events in the sidebar element 'Overview' | `mkeventd.see_in_tactical_overview` | visibilité (compteur) | non — sans effet sur l'API |
+| Update an event | `mkeventd.update` | action (acquitter, commentaire, contact) | jamais dans `hermes-read` |
+| Update an event: change comment | `mkeventd.update_comment` | action | jamais dans `hermes-read` |
+| Update an event: change contact | `mkeventd.update_contact` | action | jamais dans `hermes-read` |
+| Change event state | `mkeventd.changestate` | action (CRIT → WARN…) | jamais dans `hermes-read` |
+| Perform custom action | `mkeventd.actions` | action (scripts, envoi d'e-mails) | jamais |
+| Archive an event | `mkeventd.delete` | action (archiver un événement) | jamais |
+| Archive events of hosts | `mkeventd.archive_events_of_hosts` | action | jamais |
+| Configuration of event rules | `mkeventd.edit` | configuration (créer/modifier/supprimer les règles de corrélation) | jamais — ouvre aussi le module Setup *Event Console* |
+| Configuration of Event Console | `mkeventd.config` | configuration (réglages globaux de l'EC) | jamais |
+| Activate changes for Event Console | `mkeventd.activate` | activation (domaine EC, distinct de l'activation de la configuration) | jamais |
+| Switch remote site replication mode | `mkeventd.switchmode` | exploitation (bascule sync / takeover) | jamais |
+
+Deux précisions :
+
+* les trois permissions de visibilité sont **accordées par défaut** aux rôles livrés
+  (`user`, `admin`). Leur seul effet est de retirer un filtre : sans elles, un utilisateur
+  ne voit que les événements des hôtes dont il est contact. Pour un compte qui porte déjà
+  `See all host and services`, les cocher ne change rien ;
+* l'instance n'héberge **aucun événement** (liste vide au 16/09/2026) : il n'y a rien à
+  lire aujourd'hui, et le test ci-dessus prouve seulement que le droit de lecture est déjà
+  acquis.
+
+**Conséquence** : ni `hermes-read` ni `hermes-ops` n'ont besoin d'une case de cette section.
+Si l'Event Console est un jour alimenté (traps SNMP, syslog), le besoin ne sera pas un droit
+de lecture — il est déjà là — mais `Update an event` / `Change event state` pour *acquitter*
+un événement : à ce moment-là seulement, et dans `hermes-ops` uniquement. La portée
+`wato.all_folders` et les permissions de configuration EC (`mkeventd.edit`, `mkeventd.config`)
+restent hors périmètre.
 
 ## 5. Profil 1 — lecture seule (`hermes-read`)
 
@@ -349,7 +397,9 @@ contre l'instance (Checkmk **2.5.0p11**, community). Méthode :
 - **Les règles, depuis l'ajout de `Rule sets`** : la liste des 42 jeux de règles
   qui en contiennent, les 21 règles du jeu `ignored_services`, et le contenu
   complet d'une règle lue par son identifiant (conditions, valeur, dossier).
-- La console d'événements (`mkeventd.*` en lecture) — vide sur cette instance.
+- **Les événements** (*Event Console*) : l'endpoint REST répond 200 **sans aucune case
+  `mkeventd.*`** — la lecture est donc déjà acquise ; l'instance n'en héberge aucun
+  (liste vide). Voir la section dédiée au §4.
 - La version de l'instance.
 
 ### Ce que le compte se voit refuser (libellé rendu par l'instance)
@@ -447,6 +497,7 @@ settings`, `User management`, `Host & service groups`, `Password management`,
 Table relevée dans la spec OpenAPI de l'instance (libellé ↔ identifiant) :
 
 ```
+Activate changes for Event Console mkeventd.activate
 Activate configuration            wato.activate
 Add & remove folders              wato.manage_folders
 Add & remove hosts                wato.manage_hosts
@@ -454,9 +505,12 @@ Add comments                      action.addcomment
 Acknowledge                       action.acknowledge
 Agent pairing                     general.agent_pairing
 Archive an event                  mkeventd.delete
+Archive events of hosts           mkeventd.archive_events_of_hosts
 Audit log                         wato.auditlog
 Business Intelligence rules       wato.bi_rules
 Change event state                mkeventd.changestate
+Configuration of Event Console    mkeventd.config
+Configuration of event rules      mkeventd.edit
 Disabled services                 wato.service_discovery_to_ignored
 Edit personal notification…       general.edit_notifications
 Host & service groups             wato.groups
@@ -471,16 +525,22 @@ Move existing hosts               wato.move_hosts
 Move to monitored services        wato.service_discovery_to_monitored
 Move to undecided services        wato.service_discovery_to_undecided
 Password management               wato.passwords
+Perform custom action             mkeventd.actions
 Perform network parent scan       wato.parentscan
 Read access to all hosts/folders  wato.see_all_folders
 Read access to all modules        wato.seeall
 Remove services                   wato.service_discovery_to_removed
 Rename existing hosts             wato.rename_hosts
 Rule sets                         wato.rulesets
+See all events                    mkeventd.seeall
+See events not related…           mkeventd.seeunrelated
 Set/remove downtimes              action.downtimes
 Site management                   wato.sites
+Switch remote site replication…   mkeventd.switchmode
 Time periods                      wato.timeperiods
 Update an event                   mkeventd.update
+Update an event: change comment   mkeventd.update_comment
+Update an event: change contact   mkeventd.update_contact
 User management                   wato.users
 Write access to all hosts/folders wato.all_folders
 Write access to all passwords     wato.edit_all_passwords
@@ -498,6 +558,10 @@ Les sondes sont rejouables : `probe_api4.py` (lecture + écriture sans effet) et
 - ✅ Séparation lecture/écriture sur les règles **mesurée en direct** : `Rule sets`
   accordé → lecture des règles et des jeux de règles ; toute écriture (créer,
   modifier, supprimer) refusée avec `Make changes, perform actions`.
+- ✅ *Event Console* : lecture des événements possible sans aucun droit `mkeventd.*`
+  (200 mesuré), et relecture du code Checkmk (`cmk/gui/mkeventd/views.py`,
+  `cmk/gui/mkeventd/wato.py`) : les 14 permissions de la section sont visibilité,
+  action ou configuration — aucune n'est un pré-requis de lecture.
 - ✅ Section *Topics* du rôle éditeur : permissions dynamiques des pages
   (`cmk/gui/pagetypes/_core.py`, `declare_permission_section` / `declare_permission`) —
   visibilité des thèmes, sans droit d'écriture.
@@ -511,6 +575,11 @@ Les sondes sont rejouables : `probe_api4.py` (lecture + écriture sans effet) et
 
 ## 13. Journal des mises à jour
 
+- **16/09/2026** — §4 et §11 : *Event Console*. La lecture des événements répond 200 sans
+  aucune case `mkeventd.*` (sondage en lecture seule, `probe_ec.py`) ; les 14 permissions de
+  la section sont visibilité / action / configuration, aucune n'ajoute de la lecture.
+  Verdict : rien à cocher pour `hermes-read` ni `hermes-ops` aujourd'hui ; si l'EC est
+  alimenté un jour, ce sera `mkeventd.update` / `mkeventd.changestate` dans `hermes-ops`.
 - **16/09/2026** — §11 : retest après ajout de `Rule sets` à `hermes-read` — lecture des
   règles confirmée (42 jeux, 21 règles d'un jeu, une règle par identifiant), écriture
   toujours refusée (401 `Make changes, perform actions`) ; le « piège » `Write access to
