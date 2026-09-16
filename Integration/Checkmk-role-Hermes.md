@@ -35,7 +35,7 @@ Un rôle dédié borne ce qu'il peut casser :
 ## 2. Pré-requis
 
 - Un site Checkmk avec l'API REST (≥ 2.3) et, si l'agent doit écrire, les endpoints
-  `rule` + `activation_run` (voir §6).
+  `rule` + `activation_run` (voir §8).
 - **Un utilisateur d'automation dédié** plutôt qu'un compte humain : dans Setup, la création
   d'un utilisateur de type *Automation user* génère un secret qui sert d'identifiant d'API.
   Ce compte n'a pas d'accès à l'interface web.
@@ -56,7 +56,7 @@ Identifiants relevés dans `cmk/gui/wato/_permissions.py` (branche `master`) ✅
 | Read access to all hosts and folders | `wato.see_all_folders` | sinon, seuls les dossiers des contact groups de l'utilisateur |
 | Write access to all hosts and folders | `wato.all_folders` | sinon, écriture limitée aux dossiers de ses contact groups |
 | Read access to all modules | `wato.seeall` | sinon, les modules restent filtrés par contact group |
-| See all host and services | `see_all` | visibilité de tous les hôtes et services supervisés |
+| See all host and services | `general.see_all` | visibilité de tous les hôtes et services supervisés |
 | Rule sets | `wato.rulesets` | accès aux règles ; **seul**, insuffisant pour écrire |
 | Make changes, perform actions | `wato.edit` | toute modification ; **indispensable** pour créer/modifier une règle |
 | Activate configuration | `wato.activate` | appliquer les modifications en attente à la supervision |
@@ -86,7 +86,88 @@ C'est cette dernière séparation qui structure les trois profils ci-dessous.
 
 ---
 
-## 4. Profil 1 — lecture seule (`hermes-read`)
+## 4. La liste des cases à cocher, rôle par rôle
+
+Trois rôles à créer dans **Setup ▸ Users ▸ Roles & permissions**, chacun basé sur le rôle *user*
+(jamais *admin*). Règle de lecture : **tout ce qui n'est pas listé ici reste décoché.**
+
+### `hermes-read` — lecture seule
+
+| Section | Case à cocher | Identifiant |
+|---|---|---|
+| General | See all host and services | `general.see_all` |
+| Setup | Use Setup | `wato.use` |
+| Setup | Read access to all modules | `wato.seeall` |
+| Setup | Read access to all hosts and folders | `wato.see_all_folders` |
+
+Rien d'autre dans *Setup* : en particulier, aucune case d'écriture et aucune activation.
+
+### `hermes-ops` — il prépare le correctif, l'humain active
+
+Les 4 cases ci-dessus, **plus** :
+
+| Section | Case à cocher | Identifiant |
+|---|---|---|
+| Setup | Rule sets | `wato.rulesets` |
+| Setup | Make changes, perform actions | `wato.edit` |
+| Setup | Audit log | `wato.auditlog` |
+| Setup | Revert changes | `wato.discard` |
+| Setup | Write access to all hosts and folders | `wato.all_folders` — **seulement** si la portée est « tous les hôtes » ; sinon laisser décoché et travailler dans un dossier |
+| Setup | Write access to all passwords | `wato.edit_all_passwords` — facultatif, utile seulement pour un check à mot de passe stocké |
+
+Et la seule case qui fait vraiment la différence pour ce profil :
+
+| Section | Case à LAISSER DÉCOCHÉE | Identifiant |
+|---|---|---|
+| Setup | Activate configuration | `wato.activate` |
+
+### `hermes-auto` — boucle fermée
+
+Les 4 cases de `hermes-read`, les 4 nécessaires de `hermes-ops`, **plus** :
+
+| Section | Case à cocher | Identifiant |
+|---|---|---|
+| Setup | Activate configuration | `wato.activate` |
+
+`Activate foreign changes` et `Revert foreign changes` restent décochés dans les trois rôles :
+l'agent n'active et n'annule que ses propres modifications.
+
+### À ne cocher dans aucun des trois rôles
+
+| Section | Case | Identifiant | Pourquoi |
+|---|---|---|---|
+| Setup | Add or modify executables | `wato.add_or_modify_executables` | exécution de commandes arbitraires sur les hôtes supervisés |
+| Setup | Notification configuration | `wato.notifications` | l'agent pourrait modifier ses propres alertes |
+| Setup | Global settings | `wato.global` | réglages du site entier |
+| Setup | User management | `wato.users` | comprendrait la modification de son propre rôle |
+| Setup | Host management | `wato.hosts` | créer ou supprimer des hôtes supervisés |
+| Setup | Host & service groups | `wato.groups` | structure de la supervision |
+| Setup | Archive audit log | `wato.clear_auditlog` | effacerait ses propres traces |
+| Setup | Activate foreign changes | `wato.activateforeign` | embarquerait les modifications des autres utilisateurs |
+| Setup | Revert foreign changes | `wato.discardforeign` | idem, en suppression |
+| General | Edit / force / delete foreign `…`, Modify built-in `…` | `general.edit_*`, `general.force_*` | édition des objets créés par d'autres utilisateurs |
+| Modules | Global settings, User management, Roles, Site management, Backup & restore, Event Console, BI, NagVis, snapshots | — | hors périmètre |
+
+### La section « Topics » : visibilité seule, sans effet sur les droits d'écriture
+
+La liste des thèmes — `Applications (applications)`, `IT infrastructure efficiency
+(it_efficiency)`, `Monitoring (monitoring)` … — n'est pas écrite à la main dans le rôle éditeur :
+elle est **générée par les pages** de Checkmk, une entrée par thème de tableau de bord, avec
+l'identifiant `pagetype_topic.<nom>` (mécanisme vérifié dans `cmk/gui/pagetypes/_core.py` ✅).
+
+Cocher une de ces cases décide seulement si le thème — et les tableaux de bord publiés dedans —
+apparaît dans le menu de Hermes. Cela n'ouvre **aucun** droit de modification : ni Setup, ni
+règle, ni hôte, ni activation. **Tout mettre à Oui est donc sans risque.** Si la première
+version de cette page disait de ne pas les cocher, c'était pour garder le rôle minimal, pas par
+sécurité. Pour un menu plus propre, on peut ne garder que `Monitoring`, `Overview` et
+`Problems` ; c'est purement cosmétique.
+
+Même mécanique pour la section *Dashboards* (`checkmk`, `simple_problems`, `main` ) : visibilité
+des tableaux de bord nommés. Et les cases `… dashboards` de la section *General* ne concernent
+que la création ou l'édition des tableaux de bord **des utilisateurs**, sans effet sur la
+supervision des hôtes.
+
+## 5. Profil 1 — lecture seule (`hermes-read`)
 
 **Permissions** : Use Setup, Read access to all hosts and folders, Read access to all modules,
 See all host and services. Aucun droit d'écriture, aucune activation.
@@ -104,7 +185,7 @@ et rien d'autre. L'humain applique lui-même.
 **Pourquoi commencer par là** : c'est la phase d'étalonnage. Quelques semaines de constats
 suffisent à juger si les diagnostics de l'agent sont fiables avant de lui donner les clés.
 
-## 5. Profil 2 — approbation manuelle (`hermes-ops`)
+## 6. Profil 2 — approbation manuelle (`hermes-ops`)
 
 **Permissions** : profil 1 **+** Rule sets, Make changes, Audit log, Revert changes.
 **Sans** Activate configuration.
@@ -126,7 +207,7 @@ l'humain supprime la règle, rien n'a été activé.
 **Propriété intéressante** : l'agent peut préparer plusieurs correctifs d'avance, y compris
 ceux qu'on refusera — le coût d'un refus est nul.
 
-## 6. Profil 3 — full-automatique (`hermes-auto`)
+## 7. Profil 3 — full-automatique (`hermes-auto`)
 
 **Permissions** : profil 2 **+** Activate configuration. (`Activate foreign changes` reste
 inutile : l'agent n'active que ses propres modifications.)
@@ -152,7 +233,7 @@ horodatée, et le périmètre d'écriture reste un dossier de test tant que la c
 
 ---
 
-## 7. Écrire le correctif via l'API REST
+## 8. Écrire le correctif via l'API REST
 
 Chemins relevés dans le code des endpoints (branche `master`) ✅ — le préfixe commun est
 `https://<checkmk-host>/<site>/check_mk/api/1.0`.
@@ -195,7 +276,7 @@ curl -s -X POST -H "Authorization: Bearer <utilisateur> <secret>" \
 en modification restent à valider sur un site réel : les valeurs brutes d'un rule set dépendent
 du rule set visé. Le détail des modèles est dans `cmk/gui/openapi/api_endpoints/rule/models/`.
 
-## 8. Garde-fous communs aux trois profils
+## 9. Garde-fous communs aux trois profils
 
 - **Périmètre** : démarrer par un dossier de test, puis élargir. Le droit d'écriture global
   (`Write access to all hosts and folders`) n'est pas nécessaire au début.
@@ -205,12 +286,14 @@ du rule set visé. Le détail des modèles est dans `cmk/gui/openapi/api_endpoin
   deviennent un vecteur d'exécution arbitraire sur les hôtes supervisés.
 - **Jamais** `Notification configuration` : l'agent pourrait modifier ses propres alertes.
 - **Jamais** les modules *Global settings*, *User management*, *Roles*, *Site management*,
-  *Backup & restore*, *Password management* ; ni Event Console, BI, NagVis, snapshots,
-  tableaux de bord.
+  *Backup & restore*, *Password management* ; ni Event Console, BI, NagVis, snapshots.
+- **Sans objet** : les sections *Topics* et *Dashboards* du rôle éditeur ne sont que de la
+  visibilité (voir §4) ; les cases `… dashboards` de *General* ne servent qu'à créer des
+  tableaux de bord personnels.
 - **Journal d'audit** systématiquement activé, et relevé dans les rapports.
 - **Activation horodatée** + fenêtre de mesure avant conclusion (profil 3).
 
-## 9. Ce que ce rôle ne réglera pas
+## 10. Ce que ce rôle ne réglera pas
 
 - **Les checks locaux maison** (scripts custom sans rule set paramétrable) : la correction est
   une modification de script, pas une règle — hors de portée de l'API.
@@ -222,20 +305,26 @@ du rule set visé. Le détail des modèles est dans `cmk/gui/openapi/api_endpoin
 - **Un problème applicatif déguisé en mauvais réglage** : remonter le seuil ne répare pas une
   application lente. C'est justement le cas que le profil 2 laisse trancher par un humain.
 
-## 10. Ce qui est vérifié, ce qui reste à tester
+## 11. Ce qui est vérifié, ce qui reste à tester
 
 - ✅ Permissions et séparation écrire/activer (`cmk/gui/wato/_permissions.py`,
   `cmk/gui/openapi/api_endpoints/rule/_utils.py`,
   `cmk/gui/openapi/endpoints/activate_changes/__init__.py`).
 - ✅ Chemins d'API des endpoints `rule` et `activation_run`.
+- ✅ Section *Topics* du rôle éditeur : permissions dynamiques des pages
+  (`cmk/gui/pagetypes/_core.py`, `declare_permission_section` / `declare_permission`) —
+  visibilité des thèmes, sans droit d'écriture.
 - ⚠️ Création/modification de règle en pratique : corps exact du message, gestion des `etag`,
   comportement sur un dossier restreint.
 - ⚠️ Comportement du rollback automatique et fenêtre de mesure pertinente.
 - ⚠️ Aucun rôle ni utilisateur d'automation n'a encore été créé sur le site : rien n'a été
   appliqué en production à ce stade.
 
-## 11. Journal des mises à jour
+## 12. Journal des mises à jour
 
+- **16/09/2026** — §4 : la liste des cases à cocher, rôle par rôle, et la clarification de la
+  section *Topics* (visibilité seule). §3 : identifiant de *See all host and services*
+  corrigé en `general.see_all`.
 - **16/09/2026** — Première version : les trois profils, les permissions vérifiées dans le code
   source, les chemins d'API, les garde-fous. Reste à trancher : démarrer en profil 2 ou en
   profil 3, et portée (tous les hôtes ou dossier de test d'abord).
